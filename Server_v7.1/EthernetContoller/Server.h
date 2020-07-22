@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <QTextEdit>
 #include <QLineEdit>
-#include <QTcpServer>
-#include <QTcpSocket>
+#include <QWebSocketServer>
+#include <QWebSocket>
 #include <QVBoxLayout>
 #include <QMessageBox>
 #include "DataBase/DataBase.h"
@@ -16,24 +16,22 @@ class Server : public QWidget
 {
     Q_OBJECT
 private:
-    DataBase* m_registrationDataBase;
-    QTcpServer* m_tcpServer;
+    DataBaseController* m_registrationDataBase;
+    QWebSocketServer* m_tcpServer;
 
     QTextEdit* m_textPlace;
     QLineEdit* m_inputPlace;
-
-    UserID m_userID;
 
     QList<WaitingRoom*> m_waitingPlayers;
     ChatRoom* m_sharedChat;
 
 public:
-    explicit Server(QWidget *parent = nullptr);
+    explicit Server(quint16, QWidget *parent = nullptr);
 
 public slots:
     virtual void slotNewConnection();
 
-    void slotPlayerWantPlay(Player*, SettingsStruct);
+    void slotPlayerWantPlay(Player*);
     void doNewGameInstance(WaitingRoom*);
 
 

@@ -1,7 +1,9 @@
 #include "GameInstance.h"
 
-GameInstance::GameInstance(Croupier::DeckSize deckSize, bool trancferableAbility, QList<Player*> playersList, QObject *parent)
-    :QObject{ parent }
+GameInstance::GameInstance(Cash rate, Croupier::DeckSize deckSize, bool trancferableAbility, QList<Player*> playersList, QObject *parent)
+    :QObject{ parent },
+     m_rate{ rate },
+     m_winnersList()
     {
 
         m_chatRoom = new ChatRoom(Canal::GameCanal, this);
@@ -14,6 +16,20 @@ GameInstance::GameInstance(Croupier::DeckSize deckSize, bool trancferableAbility
         for(auto it = playersList.begin(); it != playersList.end(); ++it, ++index)
         {
             m_chatRoom->pushUser(*it);
+
+
+            //////////////////////////////////////////
+            if((*it)->userInfo().noDepositCash() >= m_rate) {
+                (*it)->userInfo().subNoDepositCash(m_rate);
+            } else if((*it)->userInfo().noDepositCash() > 0) {
+                quint32 sum = m_rate - (*it)->userInfo().noDepositCash();
+                (*it)->userInfo().subNoDepositCash((*it)->userInfo().noDepositCash());
+                (*it)->userInfo().subDepositCash(sum);
+            } else {
+                (*it)->userInfo().subDepositCash(m_rate);
+            }
+            //////////////////////////////////////////
+
 
 
             PlayerDeck* deck = new PlayerDeck(*it);
@@ -153,9 +169,11 @@ void GameInstance::makeTurn()
     setNewMainPair();
     emit this->instanceSignalMakeTurn(m_attackerID, m_defenderID);
 
-
     if(this->checkEndOfMatch())
-        emit this->instanceSignalEndOfMatch(m_attackerID);
+    {
+        this->endOfMatch();
+        return;
+    }
 
     drawCards();
 }
@@ -183,11 +201,23 @@ void GameInstance::playerTakeCardsFromTable(UserID playerID)
 
 
     if(this->checkEndOfMatch())
-        emit this->instanceSignalEndOfMatch(m_attackerID);
+    {
+        this->endOfMatch();
+        return;
+    }
 
     drawCards();
 }
-
+void GameInstance::endOfMatch()
+{
+    quint8 winnerIndex = 0;
+    quint8 amountOfPlayersFullSum = qreal(1 + (m_winnersList.size() + 1)) * (m_winnersList.size() + 1) / 2 - 1;
+    for(auto it = m_winnersList.begin(); it != m_winnersList.end(); ++it, ++winnerIndex)
+    {
+        (*it)->userInfo().addDepositCash(0.97 * ((m_winnersList.size() + 1) - winnerIndex) * ((m_rate * (m_winnersList.size() + 1)) / amountOfPlayersFullSum));
+    }
+    emit this->instanceSignalEndOfMatch(m_winnersList);
+}
 
 
 void GameInstance::drawCards()
@@ -230,6 +260,11 @@ void GameInstance::checkOutEliminatedPlayers()
     {
         if((*it)->playerDeckSize() == 0)
         {
+            if(m_defenderID == (*it)->id())
+            {
+                m_defenderID = findFollowingBeatingPlayer()->id();
+            }
+            m_winnersList.push_back((*it)->player());
             m_playerDecks.erase(it);
             it = m_playerDecks.begin();
         }

@@ -1,8 +1,9 @@
 #pragma once
 #include <QObject>
-#include <QTcpSocket>
+#include <QWebSocket>
 #include <QDataStream>
 #include "TypesAliases.h"
+#include "UserInformation/UserInformation.h"
 #include "SettingsStruct/SettingsStruct.h"
 #include "../../FoolGameServer/GameInstance/Card/Card.h"
 enum Canal
@@ -127,24 +128,28 @@ public:
     };
 
 private:
-    quint16 m_nextDataBlockSize;
-    QTcpSocket* m_socket;
+    QWebSocket* m_webSocket;
 
-    UserID m_ID;
-    QString m_userName;
-
+    UserInformation m_userInfo;
     SettingsStruct m_settings;
+    QPair<quint32, quint32> m_cashRange;
 
     UserState m_userState;
+
 public:
-    explicit Player(QTcpSocket*, QObject *parent = nullptr);
-    UserID id() const { return m_ID; }
+    explicit Player(QWebSocket*, QObject *parent = nullptr);
+    ~Player();
+    UserID id() const { return m_userInfo.id(); }
 
     quint8 amountOfPlayers() const { return m_settings.m_countOfPlayers; }
     quint8 deckSize() const { return m_settings.m_deckType; }
     bool trancferableAbility() const { return m_settings.m_trancferableAbility; }
 
     UserState userState() const { return m_userState; }
+    UserInformation userInfo() { return m_userInfo; }
+
+    quint32 minCash() const { return m_cashRange.first; }
+    quint32 maxCash() const { return m_cashRange.second; }
 
 protected:
     friend QDataStream& operator<<(QDataStream&, const Player&);
@@ -152,7 +157,7 @@ protected:
 public slots:
     //![чтение]
         //![первая стадия]
-        void slotReadClient();
+        void slotReadClient(const QByteArray&);
         //!
         //![вторая стадия]
             //![чтение [регистрация]]
@@ -190,7 +195,7 @@ public slots:
             void slotInstanceTakeCardFromDeck(UserID, Card::Suit, Card::Dignity);
             //!
             //![конец игры]
-            void slotInstanceEndOfMatch(UserID);
+            void slotInstanceEndOfMatch(QList<Player*>);
             //!
         //!
         //![запись [сервер -> приложение]]
@@ -206,13 +211,20 @@ public slots:
             void queueSlotYouAreRemovedFromTheQueue();
         //!
         //![запись [регистрация игрока]]
-            void registrationSlotSuccesfullySignIn(const QString&, UserID);
+            void registrationSlotSuccesfullySignIn(UserInformation);
             void registrationSlotUnsuccesfullySignIn(const QString&);
             void registrationSlotLogOut();
         //!
         //![отправка сообщений]
             void messageSlotReceiveUserMessage(Player*, Canal, const QString&);
             void messageSlotReceiveServerMessage(const QString&);
+        //!
+        //![слоты пополнения/снятия средств]
+            void cashSlotAddNoDeposit(Cash);
+            void cashSlotAddDeposit(Cash);
+
+            void cashSlotSubNoDeposit(Cash);
+            void cashSlotSubDeposit(Cash);
         //!
     //!
 
@@ -231,7 +243,7 @@ signals:
     void registrationSignalPlayerLogOut(Player*);
 
 
-    void applicationSignalUserWantPlay(Player*, SettingsStruct);
+    void applicationSignalUserWantPlay(Player*);
     void applicationSignalUserExitFromWaitingRoom(Player*);
 
     void applicationSignalPlayerDepositMoney(Cash);
@@ -241,6 +253,7 @@ signals:
 
     void messageSignalUserSendMessage(Player*, Canal, const QString&);
     //!
+    void saveUserInfoInDataBase(Player*);
 };
 
 

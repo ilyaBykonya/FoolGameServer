@@ -1,4 +1,4 @@
-QT       += core gui network
+QT       += core gui websockets sql
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -30,6 +30,7 @@ SOURCES += \
     GameInstance/StartDeck/NewDeckGenerator/NewDeckGenerator.cpp \
     GameInstance/StartDeck/StartDeck.cpp \
     Player/Player.cpp \
+    Player/UserInformation/UserInformation.cpp \
     main.cpp
 
 HEADERS += \
@@ -48,6 +49,7 @@ HEADERS += \
     GameInstance/StartDeck/StartDeck.h \
     Player/Player.h \
     Player/SettingsStruct/SettingsStruct.h \
+    Player/UserInformation/UserInformation.h \
     TypesAliases.h
 
 # Default rules for deployment.

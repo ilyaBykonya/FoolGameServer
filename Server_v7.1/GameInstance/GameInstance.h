@@ -13,6 +13,8 @@ class GameInstance : public QObject
 {
     Q_OBJECT
 private:
+    Cash m_rate;
+
     QList<PlayerDeck*> m_playerDecks;
     UserID m_attackerID;
     UserID m_defenderID;
@@ -24,8 +26,9 @@ private:
     Croupier* m_croupier;
     ChatRoom* m_chatRoom;
 
+    QList<Player*> m_winnersList;
 public:
-    explicit GameInstance(Croupier::DeckSize, bool, QList<Player*>, QObject *parent = nullptr);
+    explicit GameInstance(Cash, Croupier::DeckSize, bool, QList<Player*>, QObject *parent = nullptr);
 
 protected:
     PlayerDeck* findPlayerDeckOfID(UserID);
@@ -61,6 +64,8 @@ protected:
     //![найти игрока, идущего за отбивающимся]
     PlayerDeck* findFollowingBeatingPlayer();
 
+    void endOfMatch();
+
 public slots:
     //![слоты [стол -> инстанс]]
     void instanceSlotPlayerTryBeat(PlayerDeck*, PairID, Card::Suit, Card::Dignity);
@@ -92,7 +97,7 @@ signals:
             void signalGetAllPlayInstanceOptions(Card::Suit, Card::Dignity, QList<Player*>, UserID, UserID, quint8);
             //!
             //![сигнал конца раунда]
-            void instanceSignalEndOfMatch(UserID);
+            void instanceSignalEndOfMatch(QList<Player*>);
             //!
         //!
     //!

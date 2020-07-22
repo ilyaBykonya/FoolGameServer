@@ -1,22 +1,26 @@
 #include "Player.h"
 
-Player::Player(QTcpSocket* socket, QObject *parent)
+Player::Player(QWebSocket* socket, QObject *parent)
     :QObject{ parent },
-     m_nextDataBlockSize{ 0 },
-     m_socket{ socket },
-     m_ID{ 0 },
-     m_userName(),
+     m_webSocket{ socket },
+     m_userInfo(0, "", 0, 0, 0, 0),
      m_userState{ UserState::UserNoSignIn }
     {
-        QObject::connect(m_socket, &QTcpSocket::readyRead, this, &Player::slotReadClient);
-
-        QObject::connect(m_socket, &QTcpSocket::disconnected, m_socket, &QObject::deleteLater);
-        QObject::connect(m_socket, &QTcpSocket::disconnected, this, &QObject::deleteLater);
+        m_webSocket->setParent(this);
+        QObject::connect(m_webSocket, &QWebSocket::binaryMessageReceived, this, &Player::slotReadClient);
+        QObject::connect(m_webSocket, &QWebSocket::disconnected, this, &QObject::deleteLater);
     }
+
+Player::~Player()
+{
+    if(this->m_userState == UserState::UserNoSignIn)
+        emit this->saveUserInfoInDataBase(this);
+}
+
 
 QDataStream& operator<<(QDataStream& out, const Player& player)
 {
-    out << player.m_ID << player.m_userName;
+    out << player.id() << player.m_userInfo.name();
     return out;
 }
 
@@ -24,58 +28,44 @@ QDataStream& operator<<(QDataStream& out, const Player& player)
 
 
 
-void Player::slotReadClient()
+void Player::slotReadClient(const QByteArray& dataBlock)
 {
-    QTcpSocket* socket = qobject_cast<QTcpSocket*>(this->sender());
-    QDataStream dataBlock(socket);
-    dataBlock.setVersion(QDataStream::Version::Qt_5_14);
-    for (;;)
+    QDataStream inStream(dataBlock);
+    inStream.setVersion(QDataStream::Version::Qt_5_14);
+
+    EthernetSignals::ClientSignal::TypeSignal  typeSignal;
+    inStream >> typeSignal;
+    switch (typeSignal)
     {
-        if(!m_nextDataBlockSize)
+        case EthernetSignals::ClientSignal::TypeSignal::FromAppToServ             :
         {
-            if(socket->bytesAvailable() < sizeof(qint16))
-                break;
-
-            dataBlock >> m_nextDataBlockSize;
-        }
-        if(socket->bytesAvailable() < m_nextDataBlockSize)
+            this->slotReadFromAppToServ(inStream);
             break;
-
-        EthernetSignals::ClientSignal::TypeSignal  typeSignal;
-        dataBlock >> typeSignal;
-        switch (typeSignal)
-        {
-            case EthernetSignals::ClientSignal::TypeSignal::FromAppToServ             :
-            {
-                this->slotReadFromAppToServ(dataBlock);
-                break;
-            }
-            case EthernetSignals::ClientSignal::TypeSignal::FromAppInstToServInst     :
-            {
-                this->slotReadFromAppInstToServInst(dataBlock);
-                break;
-            }
-            case EthernetSignals::ClientSignal::TypeSignal::SignInSignals             :
-            {
-                this->slotReadSignIn(dataBlock);
-                break;
-            }
         }
-
-        m_nextDataBlockSize = 0;
+        case EthernetSignals::ClientSignal::TypeSignal::FromAppInstToServInst     :
+        {
+            this->slotReadFromAppInstToServInst(inStream);
+            break;
+        }
+        case EthernetSignals::ClientSignal::TypeSignal::SignInSignals             :
+        {
+            this->slotReadSignIn(inStream);
+            break;
+        }
     }
+
 }
-void Player::slotReadSignIn(QDataStream& dataBlock)
+void Player::slotReadSignIn(QDataStream& inStream)
 {
     EthernetSignals::ClientSignal::Signals::SignIn typeSignal;
-    dataBlock >> typeSignal;
+    inStream >> typeSignal;
     switch (typeSignal)
     {
         case EthernetSignals::ClientSignal::Signals::SignIn::TryLogIn               :
         {
             QString userName;
             QString userPassword;
-            dataBlock >> userName >> userPassword;
+            inStream >> userName >> userPassword;
             if(m_userState == UserState::UserNoSignIn)
                 emit this->registrationSignalPlayerLogIn(userName, userPassword);
 
@@ -85,7 +75,7 @@ void Player::slotReadSignIn(QDataStream& dataBlock)
         {
             QString userName;
             QString userPassword;
-            dataBlock >> userName >> userPassword;
+            inStream >> userName >> userPassword;
             if(m_userState == UserState::UserNoSignIn)
                 emit this->registrationSignalPlayerRegistration(userName, userPassword);
 
@@ -100,23 +90,30 @@ void Player::slotReadSignIn(QDataStream& dataBlock)
         }
     }
 }
-void Player::slotReadFromAppToServ(QDataStream& dataBlock)
+void Player::slotReadFromAppToServ(QDataStream& inStream)
 {
     EthernetSignals::ClientSignal::Signals::ApplicationSignal typeSignal;
-    dataBlock >> typeSignal;
+    inStream >> typeSignal;
     switch (typeSignal)
     {
         case EthernetSignals::ClientSignal::Signals::ApplicationSignal::PlayerWantPlay            :
         {
             SettingsStruct settings;
-            dataBlock >> settings.m_deckType >> settings.m_countOfPlayers >> settings.m_trancferableAbility;
+            QPair<quint32, quint32> cashRange;
+            inStream >> settings.m_deckType
+                      >> settings.m_countOfPlayers
+                      >> settings.m_trancferableAbility
+                      >> cashRange.first
+                      >> cashRange.second;
             if(m_userState == UserState::UserInLobbi)
             {
                 this->m_settings.m_deckType = settings.m_deckType;
                 this->m_settings.m_countOfPlayers = settings.m_countOfPlayers;
                 this->m_settings.m_trancferableAbility = settings.m_trancferableAbility;
+                this->m_cashRange.first = cashRange.first;
+                this->m_cashRange.second = cashRange.second;
                 //ну и дальше будет запуск подбора матчей, а пока так:
-                emit this->applicationSignalUserWantPlay(this, settings);
+                emit this->applicationSignalUserWantPlay(this);
             }
             break;
         }
@@ -131,7 +128,7 @@ void Player::slotReadFromAppToServ(QDataStream& dataBlock)
         case EthernetSignals::ClientSignal::Signals::ApplicationSignal::PlayerDepositMoney        :
         {
             Cash sum;
-            dataBlock >> sum;
+            inStream >> sum;
             if(m_userState == UserState::UserInLobbi)
                 emit this->applicationSignalPlayerDepositMoney(sum);
             break;
@@ -140,7 +137,7 @@ void Player::slotReadFromAppToServ(QDataStream& dataBlock)
         case EthernetSignals::ClientSignal::Signals::ApplicationSignal::PlayerWithdrawMoney       :
         {
             Cash sum;
-            dataBlock >> sum;
+            inStream >> sum;
             if(m_userState == UserState::UserInLobbi)
                 emit this->applicationSignalPlayerWithdrawMoney(sum);
 
@@ -150,7 +147,7 @@ void Player::slotReadFromAppToServ(QDataStream& dataBlock)
         {
             Canal canal;
             QString message;
-            dataBlock >> canal >> message;
+            inStream >> canal >> message;
             if(m_userState != UserState::UserNoSignIn)
                 emit this->messageSignalUserSendMessage(this, canal, message);
 
@@ -158,10 +155,10 @@ void Player::slotReadFromAppToServ(QDataStream& dataBlock)
         }
     }
 }
-void Player::slotReadFromAppInstToServInst(QDataStream& dataBlock)
+void Player::slotReadFromAppInstToServInst(QDataStream& inStream)
 {
     EthernetSignals::ClientSignal::Signals::TableSignal typeSignal;
-    dataBlock >> typeSignal;
+    inStream >> typeSignal;
     switch (typeSignal)
     {
         case EthernetSignals::ClientSignal::Signals::TableSignal::ActionButtonWasClicked :
@@ -175,7 +172,7 @@ void Player::slotReadFromAppInstToServInst(QDataStream& dataBlock)
             PairID pairID;
             Card::Suit cardSuit;
             Card::Dignity cardDignity;
-            dataBlock >> pairID >> cardSuit >> cardDignity;
+            inStream >> pairID >> cardSuit >> cardDignity;
             if(m_userState == UserState::UserInGame)
                 emit this->instanceSignalPlayerTryBeat(pairID, cardSuit, cardDignity);
 
@@ -185,7 +182,7 @@ void Player::slotReadFromAppInstToServInst(QDataStream& dataBlock)
         {
             Card::Suit cardSuit;
             Card::Dignity cardDignity;
-            dataBlock >> cardSuit >> cardDignity;
+            inStream >> cardSuit >> cardDignity;
             if(m_userState == UserState::UserInGame)
                 emit this->instanceSignalPlayerTryToss(cardSuit, cardDignity);
 
@@ -195,7 +192,7 @@ void Player::slotReadFromAppInstToServInst(QDataStream& dataBlock)
         {
             Card::Suit cardSuit;
             Card::Dignity cardDignity;
-            dataBlock >> cardSuit >> cardDignity;
+            inStream >> cardSuit >> cardDignity;
             if(m_userState == UserState::UserInGame)
                 emit this->instanceSignalPlayerTryTransferable(cardSuit, cardDignity);
 
@@ -213,17 +210,13 @@ void Player::queueSlotYouAreAddedToTheQueue()
         return;
     m_userState = UserState::UserWaitGame;
 
-
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
               << EthernetSignals::ServerSignal::Signals::ServerSignal::YouAreAddedToTheQueue;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    this->m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::queueSlotYouAreRemovedFromTheQueue()
 {
@@ -235,13 +228,10 @@ void Player::queueSlotYouAreRemovedFromTheQueue()
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
               << EthernetSignals::ServerSignal::Signals::ServerSignal::YouAreRemovedFromTheQueue;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    this->m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::serverSlotGetAllPlayInstanceOptions(Card::Suit trumpS, Card::Dignity trumpD, QList<Player*> players, UserID attacker, UserID defender, quint8 sizeOfDeck)
 {
@@ -253,8 +243,7 @@ void Player::serverSlotGetAllPlayInstanceOptions(Card::Suit trumpS, Card::Dignit
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
 
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
               << EthernetSignals::ServerSignal::Signals::ServerSignal::GetAllPlayInstanceOptions
               << trumpS
               << trumpD
@@ -267,9 +256,7 @@ void Player::serverSlotGetAllPlayInstanceOptions(Card::Suit trumpS, Card::Dignit
               << defender
               << sizeOfDeck;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 
 
@@ -281,16 +268,13 @@ void Player::slotInstancePlayerTossedCard(UserID playerID, Card::Suit cardSuit, 
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
               << EthernetSignals::ServerSignal::Signals::InstanceSignal::PlayerTossedCard
               << playerID
               << cardSuit
               << cardDignity;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    this->m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::slotInstancePlayerBeatCard(UserID playerID, PairID pairID, Card::Suit cardSuit, Card::Dignity cardDignity)
 {
@@ -300,17 +284,14 @@ void Player::slotInstancePlayerBeatCard(UserID playerID, PairID pairID, Card::Su
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
               << EthernetSignals::ServerSignal::Signals::InstanceSignal::PlayerBeatCard
               << playerID
               << pairID
               << cardSuit
               << cardDignity;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::slotInstancePlayerTransferable(UserID playerID, Card::Suit cardSuit, Card::Dignity cardDignity, UserID attackerID, UserID defederID)
 {
@@ -320,8 +301,7 @@ void Player::slotInstancePlayerTransferable(UserID playerID, Card::Suit cardSuit
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
               << EthernetSignals::ServerSignal::Signals::InstanceSignal::PlayerTrancferable
               << playerID
               << cardSuit
@@ -329,9 +309,7 @@ void Player::slotInstancePlayerTransferable(UserID playerID, Card::Suit cardSuit
               << attackerID
               << defederID;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::slotInstanceUnsuccesfullyAction()
 {
@@ -341,13 +319,10 @@ void Player::slotInstanceUnsuccesfullyAction()
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
               << EthernetSignals::ServerSignal::Signals::InstanceSignal::UnsuccesfullyAction;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 
 void Player::slotInstanceTakeCardFromDeck(UserID playerID, Card::Suit cardSuit, Card::Dignity cardDignity)
@@ -359,9 +334,8 @@ void Player::slotInstanceTakeCardFromDeck(UserID playerID, Card::Suit cardSuit, 
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
 
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst;
-    if(playerID == m_ID)
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst;
+    if(playerID == this->id())
     {
         outStream << EthernetSignals::ServerSignal::Signals::InstanceSignal::ThisPlayerTakeCardFromDeck
                   << cardSuit << cardDignity;
@@ -371,10 +345,8 @@ void Player::slotInstanceTakeCardFromDeck(UserID playerID, Card::Suit cardSuit, 
         outStream << EthernetSignals::ServerSignal::Signals::InstanceSignal::OtherPlayerTakeCardFromDeck
                   << playerID;
     }
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
 
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::slotInstancePlayerTakeAllCards(UserID playerID, UserID attackerID, UserID defenderID)
 {
@@ -384,16 +356,13 @@ void Player::slotInstancePlayerTakeAllCards(UserID playerID, UserID attackerID, 
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
               << EthernetSignals::ServerSignal::Signals::InstanceSignal::PlayerTakeAllCards
               << playerID
               << attackerID
               << defenderID;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::slotInstanceMakeTurn(UserID attackerID, UserID defenderID)
 {
@@ -404,18 +373,15 @@ void Player::slotInstanceMakeTurn(UserID attackerID, UserID defenderID)
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
 
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
               << EthernetSignals::ServerSignal::Signals::InstanceSignal::MakeTurn
               << attackerID
               << defenderID;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 
-void Player::slotInstanceEndOfMatch(UserID winnerID)
+void Player::slotInstanceEndOfMatch(QList<Player*> m_winnersList)
 {
     if(m_userState != UserState::UserInGame)
         return;
@@ -423,15 +389,18 @@ void Player::slotInstanceEndOfMatch(UserID winnerID)
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
-              << EthernetSignals::ServerSignal::Signals::InstanceSignal::EndOfMatch
-              << winnerID;
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServInstToAppInst
+              << EthernetSignals::ServerSignal::Signals::InstanceSignal::EndOfMatch;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
-    m_userState = UserState::UserInLobbi;
+    outStream << quint8(m_winnersList.size());
+    for(auto it = m_winnersList.begin(); it != m_winnersList.end(); ++it)
+    {
+        outStream << (*(*it));
+    }
+
+    this->m_webSocket->sendBinaryMessage(dataBlock);
+    this->m_userState = UserState::UserInLobbi;
+    this->userInfo().incrementCountOfGames();
 }
 
 
@@ -444,37 +413,31 @@ void Player::serverSlotAlertMessage(const QString& title, const QString& message
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
               << EthernetSignals::ServerSignal::Signals::ServerSignal::AlertMessage
               << title
               << message;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 
 
-void Player::registrationSlotSuccesfullySignIn(const QString& userName, UserID userID)
+void Player::registrationSlotSuccesfullySignIn(UserInformation info)
 {
     if(m_userState != UserState::UserNoSignIn)
         return;
 
-    m_userName = userName;
-    m_ID = userID;
+    m_userInfo = info;
+
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::SignInSignals
+    outStream << EthernetSignals::ServerSignal::TypeSignal::SignInSignals
               << EthernetSignals::ServerSignal::Signals::SignIn::SuccesfullySignIn
-              << userID;
+              << m_userInfo.id();
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
-    m_userState = UserState::UserInLobbi;
+    this->m_webSocket->sendBinaryMessage(dataBlock);
+    this->m_userState = UserState::UserInLobbi;
 }
 void Player::registrationSlotUnsuccesfullySignIn(const QString& errorMessage)
 {
@@ -484,14 +447,11 @@ void Player::registrationSlotUnsuccesfullySignIn(const QString& errorMessage)
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::SignInSignals
+    outStream << EthernetSignals::ServerSignal::TypeSignal::SignInSignals
               << EthernetSignals::ServerSignal::Signals::SignIn::UnsuccesfullySignIn
               << errorMessage;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::registrationSlotLogOut()
 {
@@ -499,20 +459,15 @@ void Player::registrationSlotLogOut()
         return;
 
     m_userState = UserState::UserNoSignIn;
-    m_ID = 0;
-    m_userName.clear();
-
+    m_userInfo.reset();
 
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::SignInSignals
+    outStream << EthernetSignals::ServerSignal::TypeSignal::SignInSignals
               << EthernetSignals::ServerSignal::Signals::SignIn::LogOut;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 
 
@@ -529,9 +484,7 @@ void Player::messageSlotReceiveServerMessage(const QString& message)
               << EthernetSignals::ServerSignal::Signals::ServerSignal::ServerMessageSignal
               << message;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
 }
 void Player::messageSlotReceiveUserMessage(Player* user, Canal chatCanal, const QString& message)
 {
@@ -541,14 +494,35 @@ void Player::messageSlotReceiveUserMessage(Player* user, Canal chatCanal, const 
     QByteArray dataBlock;
     QDataStream outStream(&dataBlock, QIODevice::OpenModeFlag::WriteOnly);
     outStream.setVersion(QDataStream::Version::Qt_5_14);
-    outStream << qint16(0)
-              << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
+    outStream << EthernetSignals::ServerSignal::TypeSignal::FromServToApp
               << EthernetSignals::ServerSignal::Signals::ServerSignal::UserMessageSignal
               << (*user)
               << chatCanal
               << message;
 
-    outStream.device()->seek(0);
-    outStream << qint16(dataBlock.size() - sizeof(qint16));
-    m_socket->write(dataBlock);
+    this->m_webSocket->sendBinaryMessage(dataBlock);
+}
+
+
+
+void Player::cashSlotAddNoDeposit(Cash cash)
+{
+    m_userInfo.addNoDepositCash(cash);
+    this->serverSlotAlertMessage("Cash", QString("На кошелёк поступили средства в размере: %1").arg(cash));
+}
+void Player::cashSlotAddDeposit(Cash cash)
+{
+    m_userInfo.addDepositCash(cash);
+    this->serverSlotAlertMessage("Cash", QString("На кошелёк поступили средства в размере: %1").arg(cash));
+}
+
+void Player::cashSlotSubNoDeposit(Cash cash)
+{
+    m_userInfo.subNoDepositCash(cash);
+    this->serverSlotAlertMessage("Cash", QString("С кошелька сняты средства в размере: %1").arg(cash));
+}
+void Player::cashSlotSubDeposit(Cash cash)
+{
+    m_userInfo.subDepositCash(cash);
+    this->serverSlotAlertMessage("Cash", QString("С кошелька сняты средства в размере: %1").arg(cash));
 }

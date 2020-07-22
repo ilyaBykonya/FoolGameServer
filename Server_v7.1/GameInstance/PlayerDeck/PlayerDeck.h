@@ -31,6 +31,8 @@ public:
     bool actionButtonState() const;
     void setActionButtonState(bool);
 
+    Player* player();
+
 protected slots:
     void slotThisPlayerTryBeat(PairID, Card::Suit, Card::Dignity);
     void slotThisPlayerTryToss(Card::Suit, Card::Dignity);
@@ -68,7 +70,7 @@ signals:
             void signalGetAllPlayInstanceOptions(Card::Suit, Card::Dignity, QList<Player*>, UserID, UserID, quint8);
             //!
             //![сигнал конца раунда]
-            void instanceSignalEndOfMatch(UserID);
+            void instanceSignalEndOfMatch(QList<Player*>);
             //!
         //!
     //!

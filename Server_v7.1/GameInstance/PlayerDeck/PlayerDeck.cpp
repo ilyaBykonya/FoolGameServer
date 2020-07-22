@@ -75,7 +75,10 @@ UserID PlayerDeck::id() const
     return m_controlThisDeckPlayer->id();
 }
 
-
+Player* PlayerDeck::player()
+{
+    return m_controlThisDeckPlayer;
+}
 
 
 void PlayerDeck::slotThisPlayerTryBeat(PairID pairID, Card::Suit cardSuit, Card::Dignity cardDignity)
