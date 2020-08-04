@@ -4,17 +4,18 @@
 #include <QObject>
 #include <QList>
 #include "Player/Player.h"
+#include "Player/SettingsStruct/SettingsStruct.h"
+
+#include <QTimer>
+#include <QObject>
+#include <QList>
+#include "Player/Player.h"
 
 class WaitingRoom : public QObject
 {
     Q_OBJECT
 private:
-    quint8 m_amountOfPlayers;
-    quint8 m_deckSize;
-    bool m_trancferableAbility;
-    Cash m_minCash;
-    Cash m_maxCash;
-
+    SettingsStruct m_settings;
     QList<Player*> m_pendingPlayersList;
 
     QTimer* m_roundStartTimer;
@@ -22,22 +23,18 @@ public:
     explicit WaitingRoom(QObject *parent = nullptr);
     bool possibleNewPlayer(Player*);
 
-    Cash minCash() const;
-    Cash maxCash() const;
-    quint8 amountOfPlayers() const;
-    quint8 deckSize() const;
-    bool trancferableAbility() const;
+    const SettingsStruct& waitingRoomSettings() const;
     QList<Player*> pendingPlayersList();
-protected:
-    void checkFullRoom();
 
 protected slots:
-    void forceRoundStart();
+    void checkFullRoom();
+    void forceExitRoom();
+
     void userExitFromRoom(Player*);
+    void userDisconnected();
 
 signals:
-    void roomIsFull(WaitingRoom*);
-
+    void signalRoomIsFull(WaitingRoom*);
 };
 
 #endif // WAITINGROOM_H

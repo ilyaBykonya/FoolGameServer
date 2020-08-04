@@ -1,5 +1,5 @@
 #pragma once
-#include <QObject>
+#include <QTimer>
 #include <QWebSocket>
 #include <QDataStream>
 #include "TypesAliases.h"
@@ -34,11 +34,11 @@ namespace EthernetSignals
                 PlayerDepositMoney,
                 PlayerWithdrawMoney,
 
-                MessageSignal
+                MessageSignal,
+                UpdateUserAvatar
             };
             enum TableSignal
             {
-
                 ActionButtonWasClicked = 0,
                 TryBeat,
                 TryToss,
@@ -75,7 +75,10 @@ namespace EthernetSignals
                 AlertMessage,
 
                 UserMessageSignal,
-                ServerMessageSignal
+                ServerMessageSignal,
+
+
+                UpdateUserInformation
             };
             enum InstanceSignal
             {
@@ -104,21 +107,6 @@ class Player : public QObject
 {
     Q_OBJECT
 public:
-    enum DeckType
-    {
-        Deck_24 = 0x01,
-        Deck_36 = 0x02,
-        Deck_52 = 0x04
-    };
-    enum CountPlayers
-    {
-        Players_2 = 0x01,
-        Players_3 = 0x02,
-        Players_4 = 0x04,
-        Players_5 = 0x08,
-        Players_6 = 0x10
-    };
-
     enum UserState
     {
         UserNoSignIn = 0,
@@ -130,7 +118,7 @@ public:
 private:
     QWebSocket* m_webSocket;
 
-    UserInformation m_userInfo;
+    UserInformation* m_userInfo;
     SettingsStruct m_settings;
     QPair<quint32, quint32> m_cashRange;
 
@@ -139,14 +127,12 @@ private:
 public:
     explicit Player(QWebSocket*, QObject *parent = nullptr);
     ~Player();
-    UserID id() const { return m_userInfo.id(); }
+    UserID id() const { return m_userInfo->id(); }
 
-    quint8 amountOfPlayers() const { return m_settings.m_countOfPlayers; }
-    quint8 deckSize() const { return m_settings.m_deckType; }
-    bool trancferableAbility() const { return m_settings.m_trancferableAbility; }
+    const SettingsStruct& playerSettings() const { return m_settings; }
 
     UserState userState() const { return m_userState; }
-    UserInformation userInfo() { return m_userInfo; }
+    UserInformation* userInfo() { return m_userInfo; }
 
     quint32 minCash() const { return m_cashRange.first; }
     quint32 maxCash() const { return m_cashRange.second; }
@@ -187,12 +173,12 @@ public slots:
                 //![игрок взял карты]
                 void slotInstancePlayerTakeAllCards(UserID, UserID, UserID);
                 //!
+                //![игрок берёт карты]
+                void slotInstanceTakeCardFromDeck(UserID, Card::Suit, Card::Dignity);
+                //!
                 //![отбой]
                 void slotInstanceMakeTurn(UserID, UserID);
                 //!
-            //!
-            //![игрок берёт карты]
-            void slotInstanceTakeCardFromDeck(UserID, Card::Suit, Card::Dignity);
             //!
             //![конец игры]
             void slotInstanceEndOfMatch(QList<Player*>);
@@ -211,7 +197,7 @@ public slots:
             void queueSlotYouAreRemovedFromTheQueue();
         //!
         //![запись [регистрация игрока]]
-            void registrationSlotSuccesfullySignIn(UserInformation);
+            void registrationSlotSuccesfullySignIn(UserInformation*);
             void registrationSlotUnsuccesfullySignIn(const QString&);
             void registrationSlotLogOut();
         //!
@@ -219,13 +205,14 @@ public slots:
             void messageSlotReceiveUserMessage(Player*, Canal, const QString&);
             void messageSlotReceiveServerMessage(const QString&);
         //!
-        //![слоты пополнения/снятия средств]
-            void cashSlotAddNoDeposit(Cash);
-            void cashSlotAddDeposit(Cash);
 
-            void cashSlotSubNoDeposit(Cash);
-            void cashSlotSubDeposit(Cash);
+        //![обновление информации об игроке]
+            void slotUpdateUserInfo();
         //!
+    //!
+    //![слоты пополнения/снятия средств]
+        void cashSlotDepositDollars(Cash);
+        void cashSlotWithdrawDollars(Cash);
     //!
 
 
@@ -254,6 +241,13 @@ signals:
     void messageSignalUserSendMessage(Player*, Canal, const QString&);
     //!
     void saveUserInfoInDataBase(Player*);
+
+
+
+
+
+
+    void signalUserDisconnected();
 };
 
 

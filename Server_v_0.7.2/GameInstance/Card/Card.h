@@ -62,7 +62,7 @@ private:
     LocationState m_location;
 public:
     //![конструкторы]
-    Card(Suit s, Dignity dig, QObject* parent);
+    Card(Suit, Dignity, QObject*);
     Card(const Card&) = delete;
     Card(Card&&) = delete;
     //!

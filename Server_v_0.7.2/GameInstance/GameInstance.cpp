@@ -1,33 +1,20 @@
 #include "GameInstance.h"
 
-GameInstance::GameInstance(Cash rate, Croupier::DeckSize deckSize, bool trancferableAbility, QList<Player*> playersList, QObject *parent)
+GameInstance::GameInstance(const SettingsStruct& gameSettings, QList<Player*> playersList, QObject *parent)
     :QObject{ parent },
-     m_rate{ rate },
+     m_rate{ transactions[gameSettings.m_rateIndex] },
      m_winnersList()
     {
-
-        m_chatRoom = new ChatRoom(Canal::GameCanal, this);
-        m_croupier = new Croupier(deckSize, trancferableAbility);
-        m_startDeck = new StartDeck(m_croupier->deckSizeAmount(), this);
+        m_croupier = new Croupier(gameSettings.m_deckType, gameSettings.m_trancferableAbility);
+        m_startDeck = new StartDeck(m_croupier->deckSize(), this);
 
         //=========================================================
 
         quint8 index = 0;
         for(auto it = playersList.begin(); it != playersList.end(); ++it, ++index)
         {
-            m_chatRoom->pushUser(*it);
-
-
-            //////////////////////////////////////////
-            if((*it)->userInfo().noDepositCash() >= m_rate) {
-                (*it)->userInfo().subNoDepositCash(m_rate);
-            } else if((*it)->userInfo().noDepositCash() > 0) {
-                quint32 sum = m_rate - (*it)->userInfo().noDepositCash();
-                (*it)->userInfo().subNoDepositCash((*it)->userInfo().noDepositCash());
-                (*it)->userInfo().subDepositCash(sum);
-            } else {
-                (*it)->userInfo().subDepositCash(m_rate);
-            }
+            (*it)->userInfo()->subRaitingPoints(100);
+            (*it)->cashSlotWithdrawDollars(m_rate);
             //////////////////////////////////////////
 
 
@@ -45,12 +32,14 @@ GameInstance::GameInstance(Cash rate, Croupier::DeckSize deckSize, bool trancfer
 
             m_playerDecks.push_back(deck);
 
+
             //=========================================================
             //Сигналы [стол] --> [инстанс]
             QObject::connect(deck, &PlayerDeck::signalThisPlayerTryToss, this, &GameInstance::instanceSlotPlayerTryToss, Qt::ConnectionType::UniqueConnection);
             QObject::connect(deck, &PlayerDeck::signalThisPlayerTryBeat, this, &GameInstance::instanceSlotPlayerTryBeat, Qt::ConnectionType::UniqueConnection);
             QObject::connect(deck, &PlayerDeck::signalThisPlayerTryTransferable, this, &GameInstance::instanceSlotPlayerTryTransferable, Qt::ConnectionType::UniqueConnection);
             QObject::connect(deck, &PlayerDeck::signalThisPlayerClickedActionButton, this, &GameInstance::instanceSlotPlayerWasClickedActionButton, Qt::ConnectionType::UniqueConnection);
+            QObject::connect(deck, &PlayerDeck::signalUserDisconnected, this, &GameInstance::slotOneOfThePlayersDisconnected, Qt::ConnectionType::UniqueConnection);
 
             //=========================================================
             //Сигналы [инстанс] --> [стол]
@@ -102,10 +91,11 @@ GameInstance::GameInstance(Cash rate, Croupier::DeckSize deckSize, bool trancfer
                                                    playersList,
                                                    m_attackerID,
                                                    m_defenderID,
-                                                   m_croupier->deckSizeAmount());
+                                                   m_croupier->deckSize());
 
         QTimer::singleShot(150, this, &GameInstance::drawCards);
     }
+
 
 PlayerDeck* GameInstance::findPlayerDeckOfID(UserID playerID)
 {
@@ -151,7 +141,18 @@ PlayerDeck* GameInstance::findFollowingBeatingPlayer()
     else
         return m_playerDecks.at(defenderIndex + 1);
 }
+PlayerDeck* GameInstance::findPreviousAttackerPlayer()
+{
+    quint16 attackerIndex = 0;
+    for(auto it = m_playerDecks.begin(); it != m_playerDecks.end(); ++it, ++attackerIndex)
+        if((*it)->id() == m_defenderID)
+            break;
 
+    if(attackerIndex == (0))
+        return m_playerDecks.last();
+    else
+        return m_playerDecks.at(attackerIndex - 1);
+}
 
 
 void GameInstance::makeTurn()
@@ -165,7 +166,7 @@ void GameInstance::makeTurn()
     }
 
 
-    checkOutEliminatedPlayers();
+    checkOutPlayers();
     setNewMainPair();
     emit this->instanceSignalMakeTurn(m_attackerID, m_defenderID);
 
@@ -193,7 +194,7 @@ void GameInstance::playerTakeCardsFromTable(UserID playerID)
     }
 
 
-    checkOutEliminatedPlayers();
+    checkOutPlayers();
 
     setNewMainPair();
     setNewMainPair();
@@ -214,7 +215,8 @@ void GameInstance::endOfMatch()
     quint8 amountOfPlayersFullSum = qreal(1 + (m_winnersList.size() + 1)) * (m_winnersList.size() + 1) / 2 - 1;
     for(auto it = m_winnersList.begin(); it != m_winnersList.end(); ++it, ++winnerIndex)
     {
-        (*it)->userInfo().addDepositCash(0.97 * ((m_winnersList.size() + 1) - winnerIndex) * ((m_rate * (m_winnersList.size() + 1)) / amountOfPlayersFullSum));
+        Cash moneyWon = 0.97 * ((m_winnersList.size() + 1) - winnerIndex) * ((m_rate * (m_winnersList.size() + 1)) / amountOfPlayersFullSum);
+        (*it)->cashSlotDepositDollars(moneyWon);
     }
     emit this->instanceSignalEndOfMatch(m_winnersList);
 }
@@ -242,16 +244,12 @@ void GameInstance::drawCards()
 }
 bool GameInstance::checkEndOfMatch()
 {
-    if(m_startDeck->deckSize() > 0)
-        return false;
-
-
     if(m_playerDecks.size() == 1)
         return true;
 
     return false;
 }
-void GameInstance::checkOutEliminatedPlayers()
+void GameInstance::checkOutPlayers()
 {
     if(m_startDeck->deckSize() != 0)
         return;
@@ -260,7 +258,7 @@ void GameInstance::checkOutEliminatedPlayers()
     {
         if((*it)->playerDeckSize() == 0)
         {
-            if(m_defenderID == (*it)->id())
+            if((*it)->id() == m_defenderID)
             {
                 m_defenderID = findFollowingBeatingPlayer()->id();
             }
@@ -370,3 +368,33 @@ void GameInstance::instanceSlotPlayerWasClickedActionButton(PlayerDeck* deck)
     }
 }
 //!
+
+
+void GameInstance::slotOneOfThePlayersDisconnected()
+{
+    PlayerDeck* player = qobject_cast<PlayerDeck*>(this->sender());
+    if(player)
+    {
+        quint8 allPlayersCount = m_playerDecks.size() + m_winnersList.size();
+        Cash reward = (allPlayersCount * m_rate * 0.97 / (allPlayersCount - 1));
+        for(auto it = m_playerDecks.begin(); it != m_playerDecks.end(); ++it)
+        {
+            if((*it)->player()->id() != player->id())
+            {
+                (*it)->player()->cashSlotDepositDollars(reward);
+                (*it)->player()->serverSlotAlertMessage("End of game", "Один из игроков потерял соединение с сервером. Весь банк был поровну рзделен между остальными игроками.");
+            }
+        }
+
+        for(auto it = m_winnersList.begin(); it != m_winnersList.end(); ++it)
+        {
+            if((*it)->id() != player->id())
+            {
+                (*it)->cashSlotDepositDollars(reward);
+                (*it)->serverSlotAlertMessage("End of game", "Один из игроков потерял соединение с сервером. Весь банк был поровну рзделен между остальными игроками.");
+            }
+        }
+
+        emit this->instanceSignalEndOfMatch(m_winnersList);
+    }
+}

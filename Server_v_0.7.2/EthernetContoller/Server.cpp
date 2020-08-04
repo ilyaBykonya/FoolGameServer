@@ -5,7 +5,6 @@ Server::Server(quint16 portNumber, QWidget *parent)
      m_tcpServer{ new QWebSocketServer("Fool_Game_Server", QWebSocketServer::SslMode::NonSecureMode, this) },
      m_sharedChat{ new ChatRoom(Canal::SharedCanal, this) }
     {
-
         if(!m_tcpServer->listen(QHostAddress::SpecialAddress::Any, portNumber))
         {
             QMessageBox::critical(this, "Port error", QString("Port: ") + QString::number(portNumber) + "\n" + m_tcpServer->errorString());
@@ -54,10 +53,9 @@ void Server::slotPlayerWantPlay(Player* player)
     if(player->userState() != Player::UserState::UserInLobbi)
         return;
 
-    quint32 sumCash = player->userInfo().depositCash() + player->userInfo().noDepositCash();
-    if(sumCash < 1000)
+    if(player->userInfo()->dollars() < transactions[player->playerSettings().m_rateIndex])
     {
-        player->serverSlotAlertMessage("No enought cash", QString("Cash: %1").arg(1000 - sumCash));
+        player->serverSlotAlertMessage("No enought cash", QString("Cash: %1").arg(1000 - player->userInfo()->dollars()));
         return;
     }
 
@@ -66,7 +64,7 @@ void Server::slotPlayerWantPlay(Player* player)
             return;
 
     WaitingRoom* newRoom = new WaitingRoom(this);
-    QObject::connect(newRoom, &WaitingRoom::roomIsFull, this, &Server::doNewGameInstance);
+    QObject::connect(newRoom, &WaitingRoom::signalRoomIsFull, this, &Server::doNewGameInstance);
     newRoom->possibleNewPlayer(player);
     m_waitingPlayers.push_back(newRoom);
 }
@@ -76,27 +74,8 @@ void Server::doNewGameInstance(WaitingRoom* room)
     if(it == m_waitingPlayers.end())
         return;
 
-    Croupier::DeckSize croupierDeckSize;
-    switch(room->deckSize())
-    {
-        case Player::DeckType::Deck_24:
-        {
-            croupierDeckSize = Croupier::DeckSize::DeckSize_24;
-            break;
-        }
-        case Player::DeckType::Deck_36:
-        {
-            croupierDeckSize = Croupier::DeckSize::DeckSize_36;
-            break;
-        }
-        default:
-        {
-            croupierDeckSize = Croupier::DeckSize::DeckSize_52;
-            break;
-        }
-    }
 
-    new GameInstance(((rand() % (room->maxCash() - room->minCash())) + room->minCash()), croupierDeckSize, room->trancferableAbility(), room->pendingPlayersList(), this);
+    new GameInstance(room->waitingRoomSettings(), room->pendingPlayersList(), this);
     m_waitingPlayers.erase(it);
     room->deleteLater();
 }
@@ -107,8 +86,8 @@ void Server::slotPlayerLogIn(const QString& name, const QString& password)
     Player* player = qobject_cast<Player*>(this->sender());
     if(player)
     {
-        UserInformation userInfo = m_registrationDataBase->tryLogIn(name, password);
-        if(!userInfo.isNull())
+        UserInformation* userInfo = m_registrationDataBase->tryLogIn(name, password);
+        if(userInfo)
         {
             QObject::connect(player, &Player::saveUserInfoInDataBase, m_registrationDataBase, &DataBaseController::saveUserInDataBase, Qt::ConnectionType::UniqueConnection);
 
@@ -135,8 +114,8 @@ void Server::slotPlayerRegistration(const QString& name, const QString& password
     Player* player = qobject_cast<Player*>(this->sender());
     if(player)
     {
-        UserInformation userInfo = m_registrationDataBase->tryRegistrationPlayer(name, password);
-        if(!userInfo.isNull())
+        UserInformation* userInfo = m_registrationDataBase->tryRegistrationPlayer(name, password);
+        if(userInfo)
         {
             QObject::connect(player, &Player::saveUserInfoInDataBase, m_registrationDataBase, &DataBaseController::saveUserInDataBase, Qt::ConnectionType::UniqueConnection);
 
@@ -182,20 +161,22 @@ void Server::slotPlayerDepositMoney(Cash money)
 {
     Player* player = qobject_cast<Player*>(this->sender());
     if(player)
-        player->cashSlotAddDeposit(money);
+    {
+        player->cashSlotDepositDollars(money);
+    }
 }
 void Server::slotPlayerWithdrawMoney(Cash money)
 {
     Player* player = qobject_cast<Player*>(this->sender());
     if(player)
     {
-        if(player->userInfo().depositCash() < money)
+        if(player->userInfo()->dollars() < money)
         {
             player->serverSlotAlertMessage("Error", "No enought cash");
         }
         else
         {
-            player->cashSlotSubDeposit(money);
+            player->cashSlotWithdrawDollars(money);
         }
     }
 }

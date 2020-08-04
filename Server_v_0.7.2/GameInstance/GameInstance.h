@@ -1,6 +1,5 @@
 #ifndef TESTINSTANCE_H
 #define TESTINSTANCE_H
-#include "ChatRoom/ChatRoom.h"
 #include "Croupier/Croupier.h"
 #include "StartDeck/StartDeck.h"
 #include "BattleArea/BattleArea.h"
@@ -24,15 +23,13 @@ private:
     HandUp* m_handUp;
 
     Croupier* m_croupier;
-    ChatRoom* m_chatRoom;
 
     QList<Player*> m_winnersList;
 public:
-    explicit GameInstance(Cash, Croupier::DeckSize, bool, QList<Player*>, QObject *parent = nullptr);
+    explicit GameInstance(const SettingsStruct&, QList<Player*>, QObject *parent = nullptr);
 
 protected:
     PlayerDeck* findPlayerDeckOfID(UserID);
-
     //![обнулить нажатия action button]
     void resetPlayersActionButton();
     //!
@@ -54,7 +51,7 @@ protected:
         bool checkEndOfMatch();
         //!
         //![проверить выбывших игроков]
-        void checkOutEliminatedPlayers();
+        void checkOutPlayers();
         //!
     //!
 
@@ -63,16 +60,20 @@ protected:
 
     //![найти игрока, идущего за отбивающимся]
     PlayerDeck* findFollowingBeatingPlayer();
+    PlayerDeck* findPreviousAttackerPlayer();
 
     void endOfMatch();
 
-public slots:
+
+
+protected slots:
     //![слоты [стол -> инстанс]]
     void instanceSlotPlayerTryBeat(PlayerDeck*, PairID, Card::Suit, Card::Dignity);
     void instanceSlotPlayerTryToss(PlayerDeck*, Card::Suit, Card::Dignity);
     void instanceSlotPlayerTryTransferable(PlayerDeck*, Card::Suit, Card::Dignity);
-
     void instanceSlotPlayerWasClickedActionButton(PlayerDeck*);
+
+    void slotOneOfThePlayersDisconnected();
     //!
 
 signals:

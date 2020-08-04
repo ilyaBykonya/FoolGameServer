@@ -8,6 +8,7 @@
 #include <QWebSocket>
 #include <QVBoxLayout>
 #include <QMessageBox>
+#include "ChatRoom/ChatRoom.h"
 #include "DataBase/DataBase.h"
 #include "WaitingRoom/WaitingRoom.h"
 #include "../GameInstance/GameInstance.h"

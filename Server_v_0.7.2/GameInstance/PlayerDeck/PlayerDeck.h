@@ -39,7 +39,6 @@ protected slots:
     void slotThisPlayerTryTransferable(Card::Suit, Card::Dignity);
     void slotThisPlayerClickedActionButton();
 
-
 signals:
     void signalThisPlayerTryBeat(PlayerDeck*, PairID, Card::Suit, Card::Dignity);
     void signalThisPlayerTryToss(PlayerDeck*, Card::Suit, Card::Dignity);
@@ -74,6 +73,8 @@ signals:
             //!
         //!
     //!
+    //!
+    void signalUserDisconnected();
 };
 
 #endif // PLAYERDECK_H

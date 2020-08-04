@@ -10,12 +10,12 @@ class DataBaseController : public QObject
     Q_OBJECT
 private:
     QSqlDatabase m_dataBase;
-    QString m_error;
+    QString m_errorString;
 public:
     explicit DataBaseController(QObject *parent = nullptr);
 
-    UserInformation tryLogIn(const QString&, const QString&);
-    UserInformation tryRegistrationPlayer(const QString&, const QString&);
+    UserInformation* tryLogIn(const QString&, const QString&);
+    UserInformation* tryRegistrationPlayer(const QString&, const QString&);
 
     bool saveUserInDataBase(Player*);
 

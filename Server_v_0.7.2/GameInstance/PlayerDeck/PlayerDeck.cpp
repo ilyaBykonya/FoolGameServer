@@ -23,6 +23,8 @@ PlayerDeck::PlayerDeck(Player* player, QObject *parent)
 
         QObject::connect(this, &PlayerDeck::signalGetAllPlayInstanceOptions, player, &Player::serverSlotGetAllPlayInstanceOptions, Qt::ConnectionType::UniqueConnection);
         QObject::connect(this, &PlayerDeck::instanceSignalEndOfMatch, player, &Player::slotInstanceEndOfMatch, Qt::ConnectionType::UniqueConnection);
+        QObject::connect(this, &PlayerDeck::instanceSignalEndOfMatch, player, &Player::slotUpdateUserInfo, Qt::ConnectionType::UniqueConnection);
+        QObject::connect(player, &Player::signalUserDisconnected, this, &PlayerDeck::signalUserDisconnected, Qt::ConnectionType::UniqueConnection);
     }
 
 void PlayerDeck::putCard(Card* card)
